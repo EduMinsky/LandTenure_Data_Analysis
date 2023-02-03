@@ -1,0 +1,424 @@
+```{r Loading packages}
+#install.packages('utils')
+#install.packages('rgdal')
+#install.packages('plyr')
+library(utils)
+library(rgdal)
+library(plyr)
+library(tidyverse)
+library(sf)
+```
+
+```{r Creating functions to work with the data}
+#The first function is required to list all municipality land tenure data
+list_zipped_files <- function(state_list,path_to_data){
+  zipFiles=list()
+  
+  for(i in 1:length(state_list)){
+    zipFiles[[i]] = list.files(path = paste0(path_to_data,lista_estado[[i]]),pattern = "*.zip",full.names = TRUE)
+  
+  }
+  return(zipFiles)
+}
+
+# This function is required to unzip all list of data that you have created with the last function
+unzip_files<-function(your_zip_list,path_to,state_list){
+  for(i in 1:length(your_zip_list)){
+    for(w in 1:length(your_zip_list[[i]])){
+      ldply(.data = your_zip_list[[i]][[w]],.fun = unzip,exdir=paste0(path_to,state_list[[i]],'\\unzipped',w))
+      
+    }
+  }
+}
+
+#When you unzip the files using the last function, what you have is more zip files! So, again we are going to list those zipped files:
+list_zipped_files_2=function(state,path_to){
+  zipped_list_2=list()
+  number_files = length(list.files(path =paste0(path_to,state), all.files = F, recursive = F, full.names = TRUE))/2
+  for (i in 1:number_files){
+    zipped_list_2[[i]]=list.files(path = paste0(path_to,state,'\\unzipped',i),pattern = "*.zip",full.names = TRUE)
+  }
+  return(zipped_list_2)
+}
+
+#Now, we can finally unzip the shapefiles that we want!:
+unzip_shapes=function(shapes_state,path_to,state){
+  for(i in 1:length(shapes_state)){
+    for(w in 1:length(shapes_state[[i]])){
+      ldply(.data = shapes_state[[i]][[w]],.fun = unzip,exdir=paste0(path_to,state,'\\unzipped',i))
+    }
+  }
+  
+}
+
+#Reading HEAVY SHAPEFILES. This function was created if I wanted to work with what I called Heavy Shape Files.
+#What is a Heavy shape file. Well, it's simply shape files that have tons of data, literally over 2,3,4 gigabytes
+#This function breakes the list of "heavy shape files" into "chunks",stack, save it into a trash folder (Directory created just for this process), automatically clear R memory, and repeat again. 
+
+reading_all_shapes_heavy=function(chunk_number,caminho,estado,type_file,nome_layer_criado,diretorio_salvar_trash,diretorio_salvar,nome_layer_trash){
+  files = list.files(path =paste0(caminho,estado), all.files = F, recursive = F, full.names = TRUE,pattern='unzipped')
+  
+  lista_2=list()
+  print('Starting to read')
+  split_data=split(files,cut(seq_along(files),chunk_number,labels = FALSE))
+  for(i in 1:length(split_data)){
+    print(i)
+    for(w in 1:length(split_data[[i]])){
+      tryCatch({
+        print(split_data[[i]][[w]])
+        shp = read_sf(paste0(split_data[[i]][[w]],'\\',type_file))
+      },error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+      
+      
+      lista_2[[w]]=shp
+      stacked_layers=do.call(rbind, lista_2)
+      
+    }
+    print('Saving')
+    st_write(stacked_layers, layer = paste0(nome_layer_trash,'_',i), diretorio_salvar_trash, driver="ESRI Shapefile")
+    print('removing previous trash file')
+    rm(stacked_layers)
+    gc()
+  }
+  print('Lets read all trashfiles')
+  trash_files=list.files(path = diretorio_salvar_trash,pattern = '.shp$',include.dirs = F, full.names = T, recursive = T)
+  print('Chunking and reading')
+  split_data_trash=split(trash_files,cut(seq_along(trash_files),5,labels = FALSE))
+  print(split_data_trash)
+  print('reading...')
+  lista_trash=list()
+  for(i in 1:length(split_data_trash)){
+    for(w in 1:length(split_data_trash[[i]])){
+      print(split_data_trash[[i]][[w]])
+      shp2=read_sf(paste0(split_data_trash[[i]][[w]]))
+      
+      lista_trash[[w]]=shp2
+      
+      print('stacking')
+      stacked_layers_trash2=do.call(rbind, lista_trash)
+    }
+    print('Saving')
+    st_write(stacked_layers_trash2, layer = paste0(nome_layer_criado,'_','chunk',i), diretorio_salvar, driver="ESRI Shapefile")
+    print('removing previous trash file')
+    rm(stacked_layers_trash2)
+    gc()
+  }
+  print('Deleting files from trash folder...')
+  file.remove(trash_files)
+  
+}
+
+#Reading LIGht SHAPEFILES:
+
+reading_all_shapes_ligth=function(caminho,estado,type_file,caminho_save){
+  files = list.files(path =paste0(caminho,estado), all.files = F, recursive = F, full.names = TRUE,pattern='unzipped')
+  lista_files = list()
+  print('Starting to read')
+  for( i in 1:length(files)){
+    tryCatch({
+      print(files[[i]])
+      shp = read_sf(paste0(files[[i]],'\\',type_file))
+    },error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+  lista_files[[i]] =shp
+  
+  }
+  
+  print('rbind now')
+  aggshp = do.call(rbind,lista_files)
+  
+  print('saving...')
+  st_write(aggshp,paste0(caminho_save,'\\',estado,'_',type_file))
+  
+  print('Memory Clear')
+  gc()
+  print('Excluding data')
+  rm(shp)
+  rm(lista_files)
+}
+
+#Extracting dataframes from shapefiles:
+df_from_shape=function(diretorio){
+  files=list.files(diretorio,pattern = '.shp$')
+  list_df=list()
+  for(i in 1:length(files)){
+    a =readOGR(paste0(diretorio,files[[i]]))
+    list_df[[i]]=a@data
+  }
+  return(list_df)
+}
+#Creating a function that, automatically generates a simple aggregated data report:
+filtering_summarizing_info = function(arquivo,estado){
+  df=read.csv(arquivo)
+  my_data=df%>%filter(COD_ESTADO==estado)%>%select(COD_ESTADO,Condicao_LAI)%>%count(COD_ESTADO,Condicao_LAI)%>%arrange(desc(n))
+  return(my_data)
+}
+
+#Function to aggregate all heavy files into one. For this purpose, I've simplified the shapefiles to become less heavy, but also wanting to keep its original polygon's format
+agg_files=function(caminho,estado,caminho_trash,caminho_save,file_type){
+  
+  list_files=list.files(caminho,pattern ='shp$', recursive=TRUE,full.names=TRUE)
+  list_files=list_files[grepl(estado,list_files)]
+  print(list_files)
+  list_shapes=list()
+  for(i in 1:length(list_files)){
+    print(list_files[[i]])
+    print('reading shape')
+    list_shapes[[i]]=st_read(list_files[[i]])
+    print('projecting')
+    list_shapes[[i]]=list_shapes[[i]]%>%st_transform(crs=5641)
+    print('Eliminating empty polygons')
+    list_shapes[[i]]=list_shapes[[i]][!st_is_empty(list_shapes[[i]]),drop=FALSE]
+    print('Memory Clear')
+    gc()
+    print('simplifying')
+    list_shapes[[i]]=st_simplify(list_shapes[[i]], preserveTopology = TRUE, dTolerance = 10)
+    print('saving...')
+    st_write(list_shapes[[i]],paste0(caminho_trash,'Layer_app_',estado,i,'.shp'))
+    print('Memory Clear')
+    gc()
+  }
+  print('Binding...')
+  list_dissolved=list()
+  list_trash=list.files(caminho_trash,pattern ='shp$', recursive=TRUE,full.names=TRUE)
+  for(i in 1:length(list_trash)){
+    list_dissolved[[i]]=st_read(list_trash[[i]])
+  }
+  print('Union...')
+  union_shape = do.call(rbind,list_dissolved)
+  print('SAving...')
+  st_write(union_shape, paste0(caminho_save,estado,'_',file_type,'.shp'))
+  
+  print('Done!!!' )
+  gc()
+  rm(union_shape)
+}
+
+#Function to clear those shapefiles with ZERO features
+clean_final_agg_file=function(path_to_files,estado,file_type,path_save){
+  files=list.files(path =path_to_files,pattern ='shp$', recursive=TRUE,full.names=TRUE )
+  print(files)
+  list_files2=files[grepl(estado,files)]
+  cat("\n")
+  print(list_files2)
+  for(i in 1:length(list_files2)){
+    print(paste0('Reading file ',i))
+    a = st_read(list_files2[[i]])
+    print('Eliminando feições vazias')
+    b=a[!st_is_empty(a),drop=FALSE]
+    c=b%>%filter(NUM_AREA !=0)
+    print('Saving')
+    st_write(c, paste0(path_save,estado,'_',file_type,'_clean','.shp'))
+    gc()
+    rm(a)
+    rm(b)
+    rm(c)
+  }
+}
+```
+
+```{r Working with these functions}
+diretorios='D:\\Eduardo_Minsky\\SICAR\\09_22\\Estados\\'
+lista_diretorios=list_zipped_files(lista_estado = list('Rondonia','Roraima','Santa Catarina','Sao Paulo','Sergipe','Tocantins'),caminho = diretorios)
+
+unzip_files(lista_zip =lista_diretorios,caminho = diretorios,lista_estado = list('Rondonia','Roraima','Santa Catarina','Sao Paulo','Sergipe','Tocantins') )
+
+
+
+lista_estado = list('Rondonia','Roraima','Santa Catarina','Sao Paulo','Sergipe','Tocantins')
+
+lista_zipped_2=list()
+for(i in 1:length(lista_estado)){
+  lista_zipped_2[[i]]=list_zipped_files_2(estado =lista_estado[[i]],caminho = diretorios)
+}
+for(i in 1:length(lista_zipped_2)){
+  unzip_shapes(shapes_estado = lista_zipped_2[[i]],caminho = diretorios,estado = lista_estado[[i]])
+}
+shape_lista=list()
+estados=list('Sao Paulo','Sergipe','Tocantins')
+nomes=list('CAR_Sao_Paulo_09_22','CAR_Sergipe_09_22','CAR_Tocantins_09_22')
+for(i in 1:length(estados)){
+  shape_lista[[i]]=reading_all_shapes(caminho = diretorios,estado = estados[[i]],type_file = 'AREA_IMOVEL',
+                                      nome_layer_criado = nomes[[i]],diretorio_salvar='D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFiles_CAR\\')
+}
+
+#Extraindo os dataframes dos shapes:
+diretorio_shape='D:/Eduardo_Minsky/SICAR/09_22/ShapeFiles_CAR/'
+files = df_from_shape(diretorio =diretorio_shape )
+files
+all_df=do.call(rbind,files)
+write.csv(all_df,'CAR_RAW_09_22.csv')
+
+
+#EXtraindo informação de Area de protecao Permanente:
+
+xup=reading_all_shapes(chunk_number =30,caminho = 'D:\\Eduardo_Minsky\\SICAR\\09_22\\Estados\\',estado='Parana',type_file='APP.shp',nome_layer_trash='trash_app',diretorio_salvar_trash='D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_APP\\trash\\',diretorio_salvar='D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_APP\\',nome_layer_criado='PR_app')
+#Agregando os arquivos de APP:
+agg_files(caminho = 'D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_APP\\',estado='TO',caminho_trash='D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_APP\\trash\\',caminho_save='D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_APP\\App_Union\\',file_type='app')
+#Extraindo info de RL
+reading_all_shapes_ligth(caminho ='D:\\Eduardo_Minsky\\SICAR\\09_22\\Estados\\' ,estado='Tocantins',type_file='RESERVA_LEGAL.shp',caminho_save = 'D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_RL\\')
+
+```
+
+```{r Analysing land tenure data}
+df = read.csv('D:\\Eduardo_Minsky\\SICAR\\09_22\\CAR_RAW_09_22.csv')
+df$CONDICAO_I%>%unique()
+
+#Creating a column in the dataframe but with the conditions written in correct Portuguese (no special characters, etc.)
+df=mutate(df,Condicao_Certa=case_when(`CONDICAO_I`==(df$CONDICAO_I%>%unique())[[1]]~'Analisado com pendencia, aguardando apresentacao de documentos',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[2]]~'Analisado com pendencia, aguardando retificacao e ou apresentacao de documentos',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[3]]~'Cancelado por decisao adm',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[4]]~'Em analise',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[5]]~'Analisado com pendencia, aguardando retificacao',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[6]]~'Aguardando analise',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[7]]~'Analisado, aguardando regularizacao ambientao lei 12651',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[8]]~'Aguardando Analise',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[9]]~'Analisado sem pendencia',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[10]]~'Analisado com pendencia, aguardando atendimento a outras restricoes',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[11]]~'Aguardando analise, nao passivel de revisao de dados',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[12]]~'Cancelado por decisao adm',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[13]]~'Cancelado por decisao judicial',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[14]]~'Analisado em conformidade com lei 12651',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[15]]~'Revisado, aguardando aceite pelo proprietario',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[16]]~'Em processo de revisao de dados',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[17]]~'Em retificacao dinamizada',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[18]]~'Aguardando analise, passivel de revisao de dados',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[19]]~'Revisado, aguardando analise da equipe',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[20]]~'Revisado, aguardando analise da regularidade ambiental',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[21]]~'Analisado, em conformidade com lei 12651, passivel de emissao de cota de Reserva Amb',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[22]]~'Analisado, em conformidade com lei 12651, passivel de emissao de cota de Reserva Amb',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[23]]~'Analisado, em conformidade com lei 12651',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[24]]~'Analisado com pendencia, aguardando retificacao e ou apresentacao de doc',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[25]]~'Cancelado por decisao adm',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[26]]~'Em analise',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[27]]~'Analisado aguardando regularizacao ambiental',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[28]]~'Aguardando analise',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[29]]~'Analisado',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[30]]~'Analisado em regularizacao ambiental',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[31]]~'Cancelado por decisao adm',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[32]]~'Cancelado por decisao adm',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[33]]~'Analisado com pendencia aguardando retificacao',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[34]]~'Analisado com pendencia aguardando apresentacao de doc',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[35]]~'Analisado sem pendencia',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[36]]~'Analisado pelo filtro automatico',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[37]]~'Analisado por filtro automatico',
+                                      `CONDICAO_I`==(df$CONDICAO_I%>%unique())[[38]]~'Retificacao automatica'))
+
+#Creating an INDEX col
+df$index = 1:nrow(df)
+#Now, we are going to create a different dataframe for each legal condition that each land tenure has. This legal condition will be interpreted from the document sent by dispatch by the Federal Public Ministry, and then reclassified.
+df$Condicao_Certa%>%unique()
+
+aguardando_analise=df[df$Condicao_Certa=='Aguardando analise'|df$Condicao_Certa=='Aguardando Analise',]
+
+aguardando_passivel_revisao = df[df$Condicao_Certa=='Aguardando analise, passivel de revisao de dados',]
+
+aguardando_nao_passivel_revisao=df[df$Condicao_Certa=='Aguardando analise, nao passivel de revisao de dados',]
+
+em_processo_revisao_dados = df[df$Condicao_Certa=='Em processo de revisao de dados',]
+
+revisado_aguardando_aceite_proprietario = df[df$Condicao_Certa=='Revisado, aguardando aceite pelo proprietario',]
+
+retificacao_dinamizada=df[df$Condicao_Certa=='Em retificacao dinamizada',]
+
+revisado_aguardando_regu_ambiental =df[df$Condicao_Certa=='Revisado, aguardando analise da regularidade ambiental',]
+
+revisado_aguardando_analise_equipe =df[df$Condicao_Certa=='Revisado, aguardando analise da equipe',]
+
+em_analise=df[df$Condicao_Certa=='Em analise',]
+
+analisado_aguardando_atendimento_notificacao=df[df$Condicao_Certa=='Analisado com pendencia aguardando retificacao'|
+                                                  df$Condicao_Certa=='Analisado com pendencia, aguardando apresentacao de documentos'|
+                                                  df$Condicao_Certa=='Analisado com pendencia, aguardando retificacao e ou apresentacao de doc'|
+                                                  df$Condicao_Certa=='Analisado com pendencia, aguardando atendimento a outras restricoes'|
+                                                  df$Condicao_Certa=='Analisado com pendencia, aguardando retificacao e ou apresentacao de documentos'|
+                                                  df$Condicao_Certa=='Analisado com pendencia, aguardando retificacao'|
+                                                  df$Condicao_Certa=='Analisado com pendencia aguardando apresentacao de doc',]
+
+retificacao_automatica=df[df$Condicao_Certa=='Retificacao automatica',]
+
+analisad_conformidade_lei_12651=df[df$Condicao_Certa=='Analisado, em conformidade com lei 12651'|
+                                     df$Condicao_Certa=='Analisado em conformidade com lei 12651'|
+                                     df$Condicao_Certa=='Analisado sem pendencia',]
+
+analisado=df[df$Condicao_Certa=='Analisado',]
+
+analisado_filtro_automatico=df[df$Condicao_Certa=='Analisado pelo filtro automatico'|
+                                 df$Condicao_Certa=='Analisado por filtro automatico',]
+
+
+
+
+analisado_conformidade_lei_passivel_emissao_cota=df[df$Condicao_Certa=='Analisado, em conformidade com lei 12651, passivel de emissao de cota de Reserva Amb',]
+
+
+
+analisado_aguardando_regu_amb=df[df$Condicao_Certa=='Analisado aguardando regularizacao ambiental'|
+                                   df$Condicao_Certa=='Analisado, aguardando regularizacao ambientao lei 12651',]
+
+
+
+analisado_em_regu_ambiental=df[df$Condicao_Certa=='Analisado em regularizacao ambiental',]
+
+
+
+cancelado_decisao_jud=df[df$Condicao_Certa=='Cancelado por decisao judicial',]
+
+
+
+cancelado_decisao_adm=df[df$Condicao_Certa=='Cancelado por decisao adm',]
+
+
+#Creating new columns for every single dataframe based on the document provided by Federal Public Ministry :
+aguardando_analise$Condicao_LAI='Aguardando Analise'
+aguardando_passivel_revisao$Condicao_LAI='Aguardando analise passivel de revisao de dados'
+aguardando_nao_passivel_revisao$Condicao_LAI='Aguardando analise nao passivel de revisao de dados'
+em_processo_revisao_dados$Condicao_LAI='Em processo de revisao de dados'
+revisado_aguardando_aceite_proprietario$Condicao_LAI='Revisado aguardando aceite pelo proprietario'
+retificacao_dinamizada$Condicao_LAI='Em retificacao dinamizada'
+revisado_aguardando_regu_ambiental$Condicao_LAI='Revisado aguardando analise da regularidade ambiental'
+revisado_aguardando_analise_equipe$Condicao_LAI='Revisado aguardando analise da equipe'
+em_analise$Condicao_LAI='Em Analise'
+analisado_aguardando_atendimento_notificacao$Condicao_LAI='Analisado aguardando atendimento a notificacao'
+retificacao_automatica$Condicao_LAI='Retificacao Automatica'
+analisad_conformidade_lei_12651$Condicao_LAI='Analisado em conformidade com lei 12651'
+analisado$Condicao_LAI='Analisado'
+analisado_filtro_automatico$Condicao_LAI='Analisado pelo filtro automatico'
+analisado_conformidade_lei_passivel_emissao_cota$Condicao_LAI='Analisado em conformidade com lei 12651 passivel de emissao de cota de Reserva Amb'
+analisado_aguardando_regu_amb$Condicao_LAI='Analisado aguardando regularizacao ambiental'
+analisado_em_regu_ambiental$Condicao_LAI='Analisado, em regularização ambiental'
+cancelado_decisao_jud$Condicao_LAI='Cancelado por decisao judicial'
+cancelado_decisao_adm$Condicao_LAI='Cancelado por decisao administrativa'
+#Row binding these dataframes and saving:
+full_df=rbind(aguardando_analise,aguardando_passivel_revisao,aguardando_nao_passivel_revisao,em_processo_revisao_dados,revisado_aguardando_aceite_proprietario,retificacao_dinamizada,revisado_aguardando_regu_ambiental,revisado_aguardando_analise_equipe,em_analise,analisado_aguardando_atendimento_notificacao,
+             retificacao_automatica,analisad_conformidade_lei_12651,analisado,analisado_filtro_automatico,analisado_conformidade_lei_passivel_emissao_cota,
+             analisado_aguardando_regu_amb,analisado_em_regu_ambiental,cancelado_decisao_jud,cancelado_decisao_adm)
+
+full_df[order(full_df$index),]
+write.csv(full_df,'D:\\Eduardo_Minsky\\SICAR\\09_22\\CAR_CondicaoLAI_09_22.csv')
+
+```
+
+```{r Creating reports for each Brazilian State to share with the Land Tenure Legal team of the office}
+estados=list('AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO')
+my_states=list()
+for(i in 1:length(estados)){
+  my_states[[i]] = filtering_summarizing_info(arquivo ='D:\\Eduardo_Minsky\\SICAR\\09_22\\CAR_CondicaoLAI_09_22.csv',estado = estados[[i]] )
+}
+for(i in 1:length(estados)){
+  write.csv(my_states[[i]],paste0(estados[[i]],'_condicao_09_22.csv'))
+}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
