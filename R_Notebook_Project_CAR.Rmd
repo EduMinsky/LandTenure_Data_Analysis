@@ -15,7 +15,7 @@ list_zipped_files <- function(state_list,path_to_data){
   zipFiles=list()
   
   for(i in 1:length(state_list)){
-    zipFiles[[i]] = list.files(path = paste0(path_to_data,lista_estado[[i]]),pattern = "*.zip",full.names = TRUE)
+    zipFiles[[i]] = list.files(path = paste0(path_to_data,state_list[[i]]),pattern = "*.zip",full.names = TRUE)
   
   }
   return(zipFiles)
@@ -217,28 +217,25 @@ clean_final_agg_file=function(path_to_files,estado,file_type,path_save){
 ```
 
 ```{r Working with these functions}
-diretorios='D:\\Eduardo_Minsky\\SICAR\\09_22\\Estados\\'
-lista_diretorios=list_zipped_files(lista_estado = list('Rondonia','Roraima','Santa Catarina','Sao Paulo','Sergipe','Tocantins'),caminho = diretorios)
+diretorios='D:\\Eduardo_Minsky\\SICAR\\04_23\\'
+lista_diretorios=list_zipped_files(state_list = list('Acre'),path_to_data = diretorios)
 
-unzip_files(lista_zip =lista_diretorios,caminho = diretorios,lista_estado = list('Rondonia','Roraima','Santa Catarina','Sao Paulo','Sergipe','Tocantins') )
+unzip_files(your_zip_list =lista_diretorios,path_to = diretorios,state_list = list('Acre'))
 
-
-
-lista_estado = list('Rondonia','Roraima','Santa Catarina','Sao Paulo','Sergipe','Tocantins')
-
+lista_estado = list('Acre')
 lista_zipped_2=list()
 for(i in 1:length(lista_estado)){
-  lista_zipped_2[[i]]=list_zipped_files_2(estado =lista_estado[[i]],caminho = diretorios)
+  lista_zipped_2[[i]]=list_zipped_files_2(state =lista_estado[[i]],path_to = diretorios)
 }
+
 for(i in 1:length(lista_zipped_2)){
-  unzip_shapes(shapes_estado = lista_zipped_2[[i]],caminho = diretorios,estado = lista_estado[[i]])
+  unzip_shapes(shapes_state = lista_zipped_2[[i]],path_to = diretorios,state = lista_estado[[i]])
 }
 shape_lista=list()
-estados=list('Sao Paulo','Sergipe','Tocantins')
-nomes=list('CAR_Sao_Paulo_09_22','CAR_Sergipe_09_22','CAR_Tocantins_09_22')
+estado=list('Acre')
+nomes=list('CAR_Acre_04_23')
 for(i in 1:length(estados)){
-  shape_lista[[i]]=reading_all_shapes(caminho = diretorios,estado = estados[[i]],type_file = 'AREA_IMOVEL',
-                                      nome_layer_criado = nomes[[i]],diretorio_salvar='D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFiles_CAR\\')
+  shape_lista[[i]]=reading_all_shapes_ligth(caminho = diretorios,estado = estados[[i]],type_file = 'AREA_IMOVEL.shp',caminho_save='D:\\Eduardo_Minsky\\SICAR\\04_23\\ShapeFiles_Imovel\\')
 }
 
 #Extraindo os dataframes dos shapes:
@@ -255,7 +252,7 @@ xup=reading_all_shapes(chunk_number =30,caminho = 'D:\\Eduardo_Minsky\\SICAR\\09
 #Agregando os arquivos de APP:
 agg_files(caminho = 'D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_APP\\',estado='TO',caminho_trash='D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_APP\\trash\\',caminho_save='D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_APP\\App_Union\\',file_type='app')
 #Extraindo info de RL
-reading_all_shapes_ligth(caminho ='D:\\Eduardo_Minsky\\SICAR\\09_22\\Estados\\' ,estado='Tocantins',type_file='RESERVA_LEGAL.shp',caminho_save = 'D:\\Eduardo_Minsky\\SICAR\\09_22\\ShapeFile_RL\\')
+reading_all_shapes_ligth(caminho ='D:\\Eduardo_Minsky\\SICAR\\04_23\\' ,estado='Acre',type_file='VEREDA.shp',caminho_save = 'D:\\Eduardo_Minsky\\SICAR\\04_23\\ShapeFiles_VEREDA\\')
 
 ```
 
@@ -409,6 +406,12 @@ for(i in 1:length(estados)){
 }
 
 ```
+
+
+
+
+
+
 
 
 
